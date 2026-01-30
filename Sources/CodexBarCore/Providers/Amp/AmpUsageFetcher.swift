@@ -3,10 +3,6 @@ import Foundation
 import FoundationNetworking
 #endif
 
-#if os(macOS)
-import SweetCookieKit
-#endif
-
 public enum AmpUsageError: LocalizedError, Sendable {
     case notLoggedIn
     case invalidCredentials
@@ -29,69 +25,6 @@ public enum AmpUsageError: LocalizedError, Sendable {
         }
     }
 }
-
-#if os(macOS)
-private let ampCookieImportOrder: BrowserCookieImportOrder =
-    ProviderDefaults.metadata[.amp]?.browserCookieOrder ?? Browser.defaultImportOrder
-
-public enum AmpCookieImporter {
-    private static let cookieClient = BrowserCookieClient()
-    private static let cookieDomains = ["ampcode.com", "www.ampcode.com"]
-    private static let sessionCookieNames: Set<String> = [
-        "session",
-    ]
-
-    public struct SessionInfo: Sendable {
-        public let cookies: [HTTPCookie]
-        public let sourceLabel: String
-
-        public init(cookies: [HTTPCookie], sourceLabel: String) {
-            self.cookies = cookies
-            self.sourceLabel = sourceLabel
-        }
-
-        public var cookieHeader: String {
-            self.cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-        }
-    }
-
-    public static func importSession(
-        browserDetection: BrowserDetection,
-        logger: ((String) -> Void)? = nil) throws -> SessionInfo
-    {
-        let log: (String) -> Void = { msg in logger?("[amp-cookie] \(msg)") }
-
-        let installed = ampCookieImportOrder.cookieImportCandidates(using: browserDetection)
-        for browserSource in installed {
-            do {
-                let query = BrowserCookieQuery(domains: self.cookieDomains)
-                let sources = try Self.cookieClient.records(
-                    matching: query,
-                    in: browserSource,
-                    logger: log)
-                for source in sources where !source.records.isEmpty {
-                    let cookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
-                    guard !cookies.isEmpty else { continue }
-                    let names = cookies.map(\.name).joined(separator: ", ")
-                    log("\(source.label) cookies: \(names)")
-                    let sessionCookies = cookies.filter { Self.sessionCookieNames.contains($0.name) }
-                    if !sessionCookies.isEmpty {
-                        log("Found Amp session cookie in \(source.label)")
-                        return SessionInfo(cookies: sessionCookies, sourceLabel: source.label)
-                    }
-                    log("\(source.label) cookies found, but no Amp session cookie present")
-                    log("Expected one of: \(Self.sessionCookieNames.joined(separator: ", "))")
-                }
-            } catch {
-                BrowserCookieAccessGate.recordIfNeeded(error)
-                log("\(browserSource.displayName) cookie import failed: \(error.localizedDescription)")
-            }
-        }
-
-        throw AmpUsageError.noSessionCookie
-    }
-}
-#endif
 
 public struct AmpUsageFetcher: Sendable {
     private static let settingsURL = URL(string: "https://ampcode.com/settings")!
@@ -209,13 +142,8 @@ public struct AmpUsageFetcher: Sendable {
             }
             throw AmpUsageError.noSessionCookie
         }
-        #if os(macOS)
-        let session = try AmpCookieImporter.importSession(browserDetection: self.browserDetection, logger: logger)
-        logger?("[amp] Using cookies from \(session.sourceLabel)")
-        return session.cookieHeader
-        #else
+        // TODO: Implement Windows browser cookie import
         throw AmpUsageError.noSessionCookie
-        #endif
     }
 
     private func fetchWithDiagnostics(
@@ -241,7 +169,7 @@ public struct AmpUsageFetcher: Sendable {
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             forHTTPHeaderField: "accept")
         request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
             forHTTPHeaderField: "user-agent")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "accept-language")

@@ -1,7 +1,4 @@
 import Foundation
-#if os(macOS)
-import Security
-#endif
 
 public struct ClaudeOAuthCredentials: Sendable {
     public let accessToken: String
@@ -97,7 +94,7 @@ public enum ClaudeOAuthCredentialsError: LocalizedError, Sendable {
         case .notFound:
             "Claude OAuth credentials not found. Run `claude` to authenticate."
         case let .keychainError(status):
-            "Claude OAuth keychain error: \(status)"
+            "Claude OAuth credential store error: \(status)"
         case let .readFailed(message):
             "Claude OAuth credentials read failed: \(message)"
         }
@@ -106,7 +103,6 @@ public enum ClaudeOAuthCredentialsError: LocalizedError, Sendable {
 
 public enum ClaudeOAuthCredentialsStore {
     private static let credentialsPath = ".claude/.credentials.json"
-    private static let claudeKeychainService = "Claude Code-credentials"
     private static let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
     public static let environmentTokenKey = "CODEXBAR_CLAUDE_OAUTH_TOKEN"
     public static let environmentScopesKey = "CODEXBAR_CLAUDE_OAUTH_SCOPES"
@@ -141,7 +137,7 @@ public enum ClaudeOAuthCredentialsStore {
         var lastError: Error?
         var expiredCredentials: ClaudeOAuthCredentials?
 
-        // 2. Try CodexBar's keychain cache (no prompts)
+        // 2. Try CodexBar's cache (file-based)
         switch KeychainCacheStore.load(key: self.cacheKey, as: CacheEntry.self) {
         case let .found(entry):
             if let creds = try? ClaudeOAuthCredentials.parse(data: entry.data) {
@@ -161,7 +157,7 @@ public enum ClaudeOAuthCredentialsStore {
             break
         }
 
-        // 3. Try file (no keychain prompt)
+        // 3. Try file
         do {
             let fileData = try self.loadFromFile()
             let creds = try ClaudeOAuthCredentials.parse(data: fileData)
@@ -181,19 +177,6 @@ public enum ClaudeOAuthCredentialsStore {
             }
         } catch {
             lastError = error
-        }
-
-        // 4. Fall back to Claude's keychain (may prompt user)
-        if let keychainData = try? self.loadFromClaudeKeychain() {
-            do {
-                let creds = try ClaudeOAuthCredentials.parse(data: keychainData)
-                self.cachedCredentials = creds
-                self.cacheTimestamp = Date()
-                self.saveToCacheKeychain(keychainData)
-                return creds
-            } catch {
-                lastError = error
-            }
         }
 
         if let expiredCredentials {
@@ -222,48 +205,10 @@ public enum ClaudeOAuthCredentialsStore {
         self.clearCacheKeychain()
     }
 
-    public static func loadFromClaudeKeychain() throws -> Data {
-        #if os(macOS)
-        if KeychainAccessGate.isDisabled {
-            throw ClaudeOAuthCredentialsError.notFound
-        }
-        if case .interactionRequired = KeychainAccessPreflight
-            .checkGenericPassword(service: self.claudeKeychainService, account: nil)
-        {
-            KeychainPromptHandler.handler?(KeychainPromptContext(
-                kind: .claudeOAuth,
-                service: self.claudeKeychainService,
-                account: nil))
-        }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: self.claudeKeychainService,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data else {
-                throw ClaudeOAuthCredentialsError.readFailed("Keychain item is empty.")
-            }
-            if data.isEmpty { throw ClaudeOAuthCredentialsError.notFound }
-            return data
-        case errSecItemNotFound:
-            throw ClaudeOAuthCredentialsError.notFound
-        default:
-            throw ClaudeOAuthCredentialsError.keychainError(Int(status))
-        }
-        #else
-        throw ClaudeOAuthCredentialsError.notFound
-        #endif
-    }
-
     /// Legacy alias for backward compatibility
     public static func loadFromKeychain() throws -> Data {
-        try self.loadFromClaudeKeychain()
+        // TODO: Implement Windows Credential Manager access
+        throw ClaudeOAuthCredentialsError.notFound
     }
 
     private static func loadFromEnvironment(_ environment: [String: String]) -> ClaudeOAuthCredentials? {

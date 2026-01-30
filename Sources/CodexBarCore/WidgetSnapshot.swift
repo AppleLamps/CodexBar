@@ -120,13 +120,8 @@ public enum WidgetSnapshotStore {
 
     private static func snapshotURL(bundleID: String?) -> URL? {
         let fm = FileManager.default
-        let groupID = self.groupID(for: bundleID)
-        #if os(macOS)
-        if let groupID, let container = fm.containerURL(forSecurityApplicationGroupIdentifier: groupID) {
-            return container.appendingPathComponent(self.filename, isDirectory: false)
-        }
-        #endif
-
+        _ = self.groupID(for: bundleID)
+        // App group containers are not used on Windows
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fm.temporaryDirectory
         let dir = base.appendingPathComponent("CodexBar", isDirectory: true)

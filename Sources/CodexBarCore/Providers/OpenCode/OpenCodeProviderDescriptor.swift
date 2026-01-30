@@ -46,44 +46,31 @@ struct OpenCodeUsageFetchStrategy: ProviderFetchStrategy {
 
     func isAvailable(_ context: ProviderFetchContext) async -> Bool {
         guard context.settings?.opencode?.cookieSource != .off else { return false }
-        return true
+        // Check if manual cookie is configured
+        if context.settings?.opencode?.cookieSource == .manual {
+            return context.settings?.opencode?.manualCookieHeader != nil
+        }
+        return false
     }
 
     func fetch(_ context: ProviderFetchContext) async throws -> ProviderFetchResult {
         let workspaceOverride = context.settings?.opencode?.workspaceID
             ?? context.env["CODEXBAR_OPENCODE_WORKSPACE_ID"]
-        let cookieSource = context.settings?.opencode?.cookieSource ?? .auto
-        do {
-            let cookieHeader = try Self.resolveCookieHeader(context: context, allowCached: true)
-            let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
-                cookieHeader: cookieHeader,
-                timeout: context.webTimeout,
-                workspaceIDOverride: workspaceOverride)
-            return self.makeResult(
-                usage: snapshot.toUsageSnapshot(),
-                sourceLabel: "web")
-        } catch OpenCodeUsageError.invalidCredentials where cookieSource != .manual {
-            #if os(macOS)
-            CookieHeaderCache.clear(provider: .opencode)
-            let cookieHeader = try Self.resolveCookieHeader(context: context, allowCached: false)
-            let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
-                cookieHeader: cookieHeader,
-                timeout: context.webTimeout,
-                workspaceIDOverride: workspaceOverride)
-            return self.makeResult(
-                usage: snapshot.toUsageSnapshot(),
-                sourceLabel: "web")
-            #else
-            throw OpenCodeUsageError.invalidCredentials
-            #endif
-        }
+        let cookieHeader = try Self.resolveCookieHeader(context: context)
+        let snapshot = try await OpenCodeUsageFetcher.fetchUsage(
+            cookieHeader: cookieHeader,
+            timeout: context.webTimeout,
+            workspaceIDOverride: workspaceOverride)
+        return self.makeResult(
+            usage: snapshot.toUsageSnapshot(),
+            sourceLabel: "web")
     }
 
     func shouldFallback(on _: Error, context _: ProviderFetchContext) -> Bool {
         false
     }
 
-    private static func resolveCookieHeader(context: ProviderFetchContext, allowCached: Bool) throws -> String {
+    private static func resolveCookieHeader(context: ProviderFetchContext) throws -> String {
         if let settings = context.settings?.opencode, settings.cookieSource == .manual {
             if let header = CookieHeaderNormalizer.normalize(settings.manualCookieHeader) {
                 let pairs = CookieHeaderNormalizer.pairs(from: header)
@@ -97,22 +84,8 @@ struct OpenCodeUsageFetchStrategy: ProviderFetchStrategy {
             throw OpenCodeSettingsError.invalidCookie
         }
 
-        #if os(macOS)
-        if allowCached,
-           let cached = CookieHeaderCache.load(provider: .opencode),
-           !cached.cookieHeader.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        {
-            return cached.cookieHeader
-        }
-        let session = try OpenCodeCookieImporter.importSession(browserDetection: context.browserDetection)
-        CookieHeaderCache.store(
-            provider: .opencode,
-            cookieHeader: session.cookieHeader,
-            sourceLabel: session.sourceLabel)
-        return session.cookieHeader
-        #else
+        // TODO: Implement Windows browser cookie import
         throw OpenCodeSettingsError.missingCookie
-        #endif
     }
 }
 
@@ -123,7 +96,7 @@ enum OpenCodeSettingsError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingCookie:
-            "No OpenCode session cookies found in browsers."
+            "No OpenCode session cookies found. Configure manual cookie in settings."
         case .invalidCookie:
             "OpenCode cookie header is invalid."
         }

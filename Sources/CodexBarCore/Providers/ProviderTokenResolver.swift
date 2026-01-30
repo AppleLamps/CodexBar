@@ -81,16 +81,7 @@ public enum ProviderTokenResolver {
         if let resolution = self.resolveEnv(KimiSettingsReader.authToken(environment: environment)) {
             return resolution
         }
-        #if os(macOS)
-        do {
-            let session = try KimiCookieImporter.importSession()
-            if let token = session.authToken {
-                return ProviderTokenResolution(token: token, source: .environment)
-            }
-        } catch {
-            // No browser cookies found, continue to fallback
-        }
-        #endif
+        // TODO: Implement Windows browser cookie import for Kimi
         return nil
     }
 

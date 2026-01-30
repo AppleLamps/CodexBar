@@ -1,8 +1,8 @@
 import Foundation
-#if canImport(SweetCookieKit)
-import SweetCookieKit
-#endif
 
+/// Gate for controlling credential access.
+///
+/// TODO: Implement Windows Credential Manager access control
 public enum KeychainAccessGate {
     private static let flagKey = "debugDisableKeychainAccess"
     private static let appGroupID = "group.com.steipete.codexbar"
@@ -21,9 +21,6 @@ public enum KeychainAccessGate {
         }
         set {
             overrideValue = newValue
-            #if os(macOS) && canImport(SweetCookieKit)
-            BrowserCookieKeychainAccessGate.isDisabled = newValue
-            #endif
         }
     }
 }

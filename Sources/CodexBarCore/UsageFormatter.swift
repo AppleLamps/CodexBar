@@ -74,11 +74,6 @@ public enum UsageFormatter {
             return "Updated just now"
         }
         if let hours = Calendar.current.dateComponents([.hour], from: date, to: now).hour, hours < 24 {
-            #if os(macOS)
-            let rel = RelativeDateTimeFormatter()
-            rel.unitsStyle = .abbreviated
-            return "Updated \(rel.localizedString(for: date, relativeTo: now))"
-            #else
             let seconds = max(0, Int(now.timeIntervalSince(date)))
             if seconds < 3600 {
                 let minutes = max(1, seconds / 60)
@@ -86,7 +81,6 @@ public enum UsageFormatter {
             }
             let wholeHours = max(1, seconds / 3600)
             return "Updated \(wholeHours)h ago"
-            #endif
         } else {
             return "Updated \(date.formatted(date: .omitted, time: .shortened))"
         }

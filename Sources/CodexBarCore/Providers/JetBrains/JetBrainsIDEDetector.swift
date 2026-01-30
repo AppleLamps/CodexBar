@@ -88,16 +88,18 @@ public enum JetBrainsIDEDetector {
 
     private static func jetBrainsConfigBasePaths() -> [String] {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        #if os(macOS)
-        return [
-            "\(homeDir)/Library/Application Support/JetBrains",
-            "\(homeDir)/Library/Application Support/Google",
-        ]
-        #else
+        #if os(Linux)
         return [
             "\(homeDir)/.config/JetBrains",
             "\(homeDir)/.local/share/JetBrains",
             "\(homeDir)/.config/Google",
+        ]
+        #else
+        // Windows paths - typically in AppData
+        let appData = ProcessInfo.processInfo.environment["APPDATA"] ?? "\(homeDir)/AppData/Roaming"
+        return [
+            "\(appData)/JetBrains",
+            "\(appData)/Google",
         ]
         #endif
     }

@@ -1,5 +1,4 @@
 import Foundation
-import SweetCookieKit
 
 // swiftformat:disable sortDeclarations
 public enum UsageProvider: String, CaseIterable, Sendable, Codable {
@@ -122,10 +121,6 @@ public enum ProviderDefaults {
 
 public enum ProviderBrowserCookieDefaults {
     public static var defaultImportOrder: BrowserCookieImportOrder? {
-        #if os(macOS)
         Browser.defaultImportOrder
-        #else
-        nil
-        #endif
     }
 }

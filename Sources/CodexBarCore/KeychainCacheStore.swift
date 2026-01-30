@@ -1,8 +1,12 @@
 import Foundation
-#if os(macOS)
-import Security
-#endif
 
+/// Credential cache store.
+///
+/// TODO: Implement Windows Credential Manager integration using:
+/// - CredWrite / CredRead / CredDelete from wincred.h
+/// - DPAPI for encryption (CryptProtectData / CryptUnprotectData)
+///
+/// Current implementation uses file-based storage as a placeholder.
 public enum KeychainCacheStore {
     public struct Key: Hashable, Sendable {
         public let category: String
@@ -39,96 +43,61 @@ public enum KeychainCacheStore {
         if let testResult = loadFromTestStore(key: key, as: type) {
             return testResult
         }
-        #if os(macOS)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: self.serviceName,
-            kSecAttrAccount as String: key.account,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-        ]
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data, !data.isEmpty else {
-                self.log.error("Keychain cache item was empty (\(key.account))")
-                return .invalid
-            }
-            let decoder = Self.makeDecoder()
-            guard let decoded = try? decoder.decode(Entry.self, from: data) else {
-                self.log.error("Failed to decode keychain cache (\(key.account))")
-                return .invalid
-            }
-            return .found(decoded)
-        case errSecItemNotFound:
+        // File-based storage for Windows (placeholder)
+        guard let cacheDir = getCacheDirectory() else { return .missing }
+        let filePath = cacheDir.appendingPathComponent("\(key.account).json")
+
+        guard FileManager.default.fileExists(atPath: filePath.path) else {
             return .missing
-        default:
-            self.log.error("Keychain cache read failed (\(key.account)): \(status)")
+        }
+
+        do {
+            let data = try Data(contentsOf: filePath)
+            let decoder = Self.makeDecoder()
+            let decoded = try decoder.decode(Entry.self, from: data)
+            return .found(decoded)
+        } catch {
+            self.log.error("Failed to load cache (\(key.account)): \(error)")
             return .invalid
         }
-        #else
-        return .missing
-        #endif
     }
 
     public static func store(key: Key, entry: some Codable) {
         if self.storeInTestStore(key: key, entry: entry) {
             return
         }
-        #if os(macOS)
-        let encoder = Self.makeEncoder()
-        guard let data = try? encoder.encode(entry) else {
-            self.log.error("Failed to encode keychain cache (\(key.account))")
-            return
-        }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: self.serviceName,
-            kSecAttrAccount as String: key.account,
-        ]
-        let updateAttrs: [String: Any] = [
-            kSecValueData as String: data,
-        ]
+        // File-based storage for Windows (placeholder)
+        guard let cacheDir = getCacheDirectory() else { return }
+        let filePath = cacheDir.appendingPathComponent("\(key.account).json")
 
-        let updateStatus = SecItemUpdate(query as CFDictionary, updateAttrs as CFDictionary)
-        if updateStatus == errSecSuccess {
-            return
+        do {
+            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+            let encoder = Self.makeEncoder()
+            let data = try encoder.encode(entry)
+            try data.write(to: filePath)
+        } catch {
+            self.log.error("Failed to store cache (\(key.account)): \(error)")
         }
-        if updateStatus != errSecItemNotFound {
-            self.log.error("Keychain cache update failed (\(key.account)): \(updateStatus)")
-            return
-        }
-
-        var addQuery = query
-        addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrLabel as String] = self.cacheLabel
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-        if addStatus != errSecSuccess {
-            self.log.error("Keychain cache add failed (\(key.account)): \(addStatus)")
-        }
-        #endif
     }
 
     public static func clear(key: Key) {
         if self.clearTestStore(key: key) {
             return
         }
-        #if os(macOS)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: self.serviceName,
-            kSecAttrAccount as String: key.account,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        if status != errSecSuccess, status != errSecItemNotFound {
-            self.log.error("Keychain cache delete failed (\(key.account)): \(status)")
-        }
-        #endif
+
+        // File-based storage for Windows (placeholder)
+        guard let cacheDir = getCacheDirectory() else { return }
+        let filePath = cacheDir.appendingPathComponent("\(key.account).json")
+
+        try? FileManager.default.removeItem(at: filePath)
+    }
+
+    private static func getCacheDirectory() -> URL? {
+        // Use AppData on Windows, or a .codexbar directory
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        return homeDir.appendingPathComponent(".codexbar").appendingPathComponent("cache")
     }
 
     static func setServiceOverrideForTesting(_ service: String?) {
