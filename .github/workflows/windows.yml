@@ -1,0 +1,266 @@
+name: Windows Build
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-cli:
+    name: Build Windows CLI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0.1"
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build CodexBarCLI (release)
+        run: swift build -c release --product CodexBarCLI
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $binPath = swift build -c release --product CodexBarCLI --show-bin-path
+          $exe = Join-Path $binPath "CodexBarCLI.exe"
+          & $exe --help
+          & $exe --version
+
+      - name: Package CLI
+        id: pkg-cli
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $binPath = swift build -c release --product CodexBarCLI --show-bin-path
+          $outDir = New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\codexbar-cli" -Force
+
+          Copy-Item "$binPath\CodexBarCLI.exe" $outDir
+
+          # Create README
+          @"
+          CodexBar CLI $tag for Windows
+          ==============================
+
+          Usage:
+              CodexBarCLI.exe --help
+              CodexBarCLI.exe usage
+              CodexBarCLI.exe usage --provider claude
+
+          For more information: https://github.com/steipete/CodexBar
+          "@ | Out-File -FilePath "$outDir\README.txt" -Encoding UTF8
+
+          $asset = "CodexBarCLI-$tag-windows-x64.zip"
+          Compress-Archive -Path "$outDir\*" -DestinationPath "$env:RUNNER_TEMP\$asset"
+
+          # Generate checksum
+          $hash = (Get-FileHash "$env:RUNNER_TEMP\$asset" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File -FilePath "$env:RUNNER_TEMP\$asset.sha256" -Encoding ASCII -NoNewline
+
+          echo "out_dir=$env:RUNNER_TEMP" >> $env:GITHUB_OUTPUT
+          echo "asset=$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexbar-windows-cli
+          path: |
+            ${{ steps.pkg-cli.outputs.out_dir }}/${{ steps.pkg-cli.outputs.asset }}
+            ${{ steps.pkg-cli.outputs.out_dir }}/${{ steps.pkg-cli.outputs.asset }}.sha256
+
+  build-windows-gui:
+    name: Build Windows GUI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore Sources/CodexBarWindows/CodexBarWindows.csproj
+
+      - name: Build GUI (Release)
+        run: dotnet build Sources/CodexBarWindows/CodexBarWindows.csproj -c Release --no-restore
+
+      - name: Publish GUI
+        run: |
+          dotnet publish Sources/CodexBarWindows/CodexBarWindows.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/gui
+
+      - name: Package GUI
+        id: pkg-gui
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $asset = "CodexBar-$tag-windows-x64-gui.zip"
+
+          Compress-Archive -Path "publish/gui/*" -DestinationPath $asset
+
+          # Generate checksum
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File -FilePath "$asset.sha256" -Encoding ASCII -NoNewline
+
+          echo "asset=$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Upload GUI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexbar-windows-gui
+          path: |
+            ${{ steps.pkg-gui.outputs.asset }}
+            ${{ steps.pkg-gui.outputs.asset }}.sha256
+
+  create-installer:
+    name: Create Windows Installer
+    runs-on: windows-latest
+    needs: [build-windows-cli, build-windows-gui]
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codexbar-windows-cli
+          path: artifacts/cli
+
+      - name: Download GUI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codexbar-windows-gui
+          path: artifacts/gui
+
+      - name: Extract artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "installer/files" -Force
+          Expand-Archive -Path "artifacts/cli/CodexBarCLI-*-windows-x64.zip" -DestinationPath "installer/files"
+          Expand-Archive -Path "artifacts/gui/CodexBar-*-windows-x64-gui.zip" -DestinationPath "installer/files"
+
+      - name: Create Inno Setup script
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $version = $tag -replace '^v', ''
+
+          @"
+          [Setup]
+          AppName=CodexBar
+          AppVersion=$version
+          AppPublisher=CodexBar Team
+          AppPublisherURL=https://github.com/steipete/CodexBar
+          DefaultDirName={autopf}\CodexBar
+          DefaultGroupName=CodexBar
+          OutputDir=output
+          OutputBaseFilename=CodexBar-$tag-windows-x64-setup
+          Compression=lzma2
+          SolidCompression=yes
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          WizardStyle=modern
+
+          [Files]
+          Source: "files\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+
+          [Icons]
+          Name: "{group}\CodexBar"; Filename: "{app}\CodexBar.exe"
+          Name: "{group}\CodexBar CLI"; Filename: "{cmd}"; Parameters: "/k ""{app}\CodexBarCLI.exe"""
+          Name: "{group}\Uninstall CodexBar"; Filename: "{uninstallexe}"
+          Name: "{autodesktop}\CodexBar"; Filename: "{app}\CodexBar.exe"; Tasks: desktopicon
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
+
+          [Registry]
+          Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
+              ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+              Check: NeedsAddPath('{app}')
+
+          [Run]
+          Filename: "{app}\CodexBar.exe"; Description: "Launch CodexBar"; Flags: nowait postinstall skipifsilent
+
+          [Code]
+          function NeedsAddPath(Param: string): boolean;
+          var
+            OrigPath: string;
+          begin
+            if not RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath)
+            then begin
+              Result := True;
+              exit;
+            end;
+            Result := Pos(';' + Param + ';', ';' + OrigPath + ';') = 0;
+          end;
+          "@ | Out-File -FilePath "installer/setup.iss" -Encoding UTF8
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          # Download Inno Setup
+          $innoUrl = "https://jrsoftware.org/download.php/is.exe"
+          Invoke-WebRequest -Uri $innoUrl -OutFile "innosetup.exe"
+
+          # Install Inno Setup silently
+          Start-Process -FilePath "innosetup.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+
+          # Build installer
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "installer\setup.iss"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexbar-windows-installer
+          path: installer/output/*.exe
+
+  upload-release-assets:
+    name: Upload Release Assets
+    runs-on: ubuntu-latest
+    needs: [build-windows-cli, build-windows-gui, create-installer]
+    if: github.event_name == 'release'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          # Upload CLI
+          gh release upload "$TAG" \
+            artifacts/codexbar-windows-cli/CodexBarCLI-*-windows-x64.zip \
+            artifacts/codexbar-windows-cli/CodexBarCLI-*-windows-x64.zip.sha256 \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+          # Upload GUI
+          gh release upload "$TAG" \
+            artifacts/codexbar-windows-gui/CodexBar-*-windows-x64-gui.zip \
+            artifacts/codexbar-windows-gui/CodexBar-*-windows-x64-gui.zip.sha256 \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+          # Upload installer
+          gh release upload "$TAG" \
+            artifacts/codexbar-windows-installer/*.exe \
+            --clobber --repo "$GITHUB_REPOSITORY"

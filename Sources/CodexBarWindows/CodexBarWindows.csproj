@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Resources\codexbar.ico</ApplicationIcon>
+    <AssemblyName>CodexBar</AssemblyName>
+    <RootNamespace>CodexBarWindows</RootNamespace>
+    <Version>1.0.0</Version>
+    <Authors>CodexBar Team</Authors>
+    <Company>CodexBar</Company>
+    <Product>CodexBar</Product>
+    <Description>Monitor API usage across AI providers</Description>
+    <Copyright>Copyright © 2025</Copyright>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\codexbar.ico" />
+    <Resource Include="Resources\codexbar_light.ico" />
+    <Resource Include="Resources\codexbar_dark.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

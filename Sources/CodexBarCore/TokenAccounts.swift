@@ -92,11 +92,12 @@ public struct FileTokenAccountStore: ProviderTokenAccountStoring, @unchecked Sen
     }
 
     private func applySecurePermissionsIfNeeded() throws {
-        #if os(macOS)
+        #if os(Linux) || os(macOS)
         try self.fileManager.setAttributes([
             .posixPermissions: NSNumber(value: Int16(0o600)),
         ], ofItemAtPath: self.fileURL.path)
         #endif
+        // TODO: Implement Windows file permission setting using SetFileSecurity
     }
 
     public static func defaultURL() -> URL {

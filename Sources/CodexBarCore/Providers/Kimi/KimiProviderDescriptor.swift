@@ -55,12 +55,7 @@ struct KimiWebFetchStrategy: ProviderFetchStrategy {
             return true
         }
 
-        #if os(macOS)
-        if context.settings?.kimi?.cookieSource != .off {
-            return KimiCookieImporter.hasSession()
-        }
-        #endif
-
+        // TODO: Implement Windows browser cookie import
         return false
     }
 
@@ -87,19 +82,7 @@ struct KimiWebFetchStrategy: ProviderFetchStrategy {
             return override.token
         }
 
-        // Try browser cookie import when auto mode is enabled
-        #if os(macOS)
-        if context.settings?.kimi?.cookieSource != .off {
-            do {
-                let session = try KimiCookieImporter.importSession()
-                if let token = session.authToken {
-                    return token
-                }
-            } catch {
-                // No browser cookies found
-            }
-        }
-        #endif
+        // TODO: Implement Windows browser cookie import
 
         // Fall back to environment
         if let override = Self.resolveToken(environment: context.env) {

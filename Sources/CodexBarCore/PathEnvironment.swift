@@ -35,6 +35,15 @@ public struct PathDebugSnapshot: Equatable, Sendable {
     }
 }
 
+// Platform-specific path separator
+#if os(Windows)
+private let pathSeparator: Character = ";"
+private let executableExtensions = [".exe", ".cmd", ".bat", ".ps1"]
+#else
+private let pathSeparator: Character = ":"
+private let executableExtensions: [String] = []
+#endif
+
 public enum BinaryLocator {
     public static func resolveClaudeBinary(
         env: [String: String] = ProcessInfo.processInfo.environment,
@@ -133,6 +142,26 @@ public enum BinaryLocator {
             return override
         }
 
+        #if os(Windows)
+        // On Windows, search PATH for executables with extensions
+        if let existingPATH = env["PATH"] {
+            let pathDirs = existingPATH.split(separator: pathSeparator).map(String.init)
+            if let pathHit = self.findWindows(name, in: pathDirs, fileManager: fileManager) {
+                return pathHit
+            }
+        }
+
+        // Windows-specific fallback locations
+        let windowsFallback = [
+            "\(home)\\AppData\\Local\\Programs",
+            "\(home)\\AppData\\Roaming\\npm",
+            "C:\\Program Files",
+            "C:\\Program Files (x86)",
+        ]
+        if let pathHit = self.findWindows(name, in: windowsFallback, fileManager: fileManager) {
+            return pathHit
+        }
+        #else
         // 2) Login-shell PATH (captured once per launch)
         if let loginPATH,
            let pathHit = self.find(name, in: loginPATH, fileManager: fileManager)
@@ -144,7 +173,7 @@ public enum BinaryLocator {
         if let existingPATH = env["PATH"],
            let pathHit = self.find(
                name,
-               in: existingPATH.split(separator: ":").map(String.init),
+               in: existingPATH.split(separator: pathSeparator).map(String.init),
                fileManager: fileManager)
         {
             return pathHit
@@ -169,6 +198,7 @@ public enum BinaryLocator {
         if let pathHit = self.find(name, in: fallback, fileManager: fileManager) {
             return pathHit
         }
+        #endif
 
         return nil
     }
@@ -182,6 +212,29 @@ public enum BinaryLocator {
         }
         return nil
     }
+
+    #if os(Windows)
+    private static func findWindows(_ binary: String, in paths: [String], fileManager: FileManager) -> String? {
+        for path in paths where !path.isEmpty {
+            let basePath = path.hasSuffix("\\") ? String(path.dropLast()) : path
+
+            // Try with each executable extension
+            for ext in executableExtensions {
+                let candidate = "\(basePath)\\\(binary)\(ext)"
+                if fileManager.fileExists(atPath: candidate) {
+                    return candidate
+                }
+            }
+
+            // Also try without extension (for native executables)
+            let candidate = "\(basePath)\\\(binary)"
+            if fileManager.fileExists(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+    #endif
 }
 
 public enum ShellCommandLocator {
@@ -191,6 +244,30 @@ public enum ShellCommandLocator {
         _ timeout: TimeInterval,
         _ fileManager: FileManager) -> String?
     {
+        #if os(Windows)
+        // On Windows, use 'where' command instead of 'command -v'
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "C:\\Windows\\System32\\where.exe")
+        process.arguments = [tool]
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+
+        let lines = text.split(separator: "\r\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        for line in lines where fileManager.fileExists(atPath: line) {
+            return line
+        }
+        return nil
+        #else
         let text = self.runShellCapture(shell, timeout, "command -v \(tool)")?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let text, !text.isEmpty else { return nil }
@@ -204,6 +281,7 @@ public enum ShellCommandLocator {
         }
 
         return nil
+        #endif
     }
 
     public static func resolveAlias(
@@ -213,6 +291,10 @@ public enum ShellCommandLocator {
         _ fileManager: FileManager,
         _ home: String) -> String?
     {
+        #if os(Windows)
+        // Windows doesn't have shell aliases in the same way
+        return nil
+        #else
         let command = "alias \(tool) 2>/dev/null; type -a \(tool) 2>/dev/null"
         guard let text = self.runShellCapture(shell, timeout, command) else { return nil }
         let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -230,8 +312,10 @@ public enum ShellCommandLocator {
         }
 
         return nil
+        #endif
     }
 
+    #if !os(Windows)
     private static func runShellCapture(_ shell: String?, _ timeout: TimeInterval, _ command: String) -> String? {
         let shellPath = (shell?.isEmpty == false) ? shell! : "/bin/zsh"
         let isCI = ["1", "true"].contains(ProcessInfo.processInfo.environment["CI"]?.lowercased())
@@ -318,6 +402,7 @@ public enum ShellCommandLocator {
         if raw.hasPrefix("~/") { return home + String(raw.dropFirst()) }
         return raw
     }
+    #endif
 }
 
 public enum PathBuilder {
@@ -329,16 +414,26 @@ public enum PathBuilder {
     {
         var parts: [String] = []
 
+        #if !os(Windows)
         if let loginPATH, !loginPATH.isEmpty {
             parts.append(contentsOf: loginPATH)
         }
+        #endif
 
         if let existing = env["PATH"], !existing.isEmpty {
-            parts.append(contentsOf: existing.split(separator: ":").map(String.init))
+            parts.append(contentsOf: existing.split(separator: pathSeparator).map(String.init))
         }
 
         if parts.isEmpty {
+            #if os(Windows)
+            parts.append(contentsOf: [
+                "C:\\Windows\\System32",
+                "C:\\Windows",
+                "C:\\Windows\\System32\\Wbem",
+            ])
+            #else
             parts.append(contentsOf: ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+            #endif
         }
 
         var seen = Set<String>()
@@ -350,7 +445,7 @@ public enum PathBuilder {
             return nil
         }
 
-        return deduped.joined(separator: ":")
+        return deduped.joined(separator: String(pathSeparator))
     }
 
     public static func debugSnapshot(
@@ -367,7 +462,7 @@ public enum PathBuilder {
         let codex = BinaryLocator.resolveCodexBinary(env: env, loginPATH: login, home: home)
         let claude = BinaryLocator.resolveClaudeBinary(env: env, loginPATH: login, home: home)
         let gemini = BinaryLocator.resolveGeminiBinary(env: env, loginPATH: login, home: home)
-        let loginString = login?.joined(separator: ":")
+        let loginString = login?.joined(separator: String(pathSeparator))
         return PathDebugSnapshot(
             codexBinary: codex,
             claudeBinary: claude,
@@ -392,6 +487,11 @@ enum LoginShellPathCapturer {
         shell: String? = ProcessInfo.processInfo.environment["SHELL"],
         timeout: TimeInterval = 2.0) -> [String]?
     {
+        #if os(Windows)
+        // On Windows, just use the PATH environment variable directly
+        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+        return path.split(separator: ";").map(String.init)
+        #else
         let shellPath = (shell?.isEmpty == false) ? shell! : "/bin/zsh"
         let isCI = ["1", "true"].contains(ProcessInfo.processInfo.environment["CI"]?.lowercased())
         let marker = "__CODEXBAR_PATH__"
@@ -437,6 +537,7 @@ enum LoginShellPathCapturer {
         let value = extracted.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
         return value.split(separator: ":").map(String.init)
+        #endif
     }
 }
 

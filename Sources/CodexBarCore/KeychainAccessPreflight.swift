@@ -1,7 +1,4 @@
-#if os(macOS)
-import LocalAuthentication
-import Security
-#endif
+import Foundation
 
 public struct KeychainPromptContext: Sendable {
     public enum Kind: Sendable {
@@ -37,6 +34,9 @@ public enum KeychainPromptHandler {
     public nonisolated(unsafe) static var handler: ((KeychainPromptContext) -> Void)?
 }
 
+/// Preflight check for credential access.
+///
+/// TODO: Implement Windows Credential Manager preflight using CredRead
 public enum KeychainAccessPreflight {
     public enum Outcome: Sendable {
         case allowed
@@ -48,39 +48,9 @@ public enum KeychainAccessPreflight {
     private static let log = CodexBarLog.logger(LogCategories.keychainPreflight)
 
     public static func checkGenericPassword(service: String, account: String?) -> Outcome {
-        #if os(macOS)
+        // TODO: Implement Windows Credential Manager check
+        // For now, return notFound as placeholder
         guard !KeychainAccessGate.isDisabled else { return .notFound }
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-            kSecUseAuthenticationContext as String: context,
-        ]
-        if let account {
-            query[kSecAttrAccount as String] = account
-        }
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            self.log.debug("Keychain preflight allowed", metadata: ["service": service])
-            return .allowed
-        case errSecItemNotFound:
-            self.log.debug("Keychain preflight not found", metadata: ["service": service])
-            return .notFound
-        case errSecInteractionNotAllowed:
-            self.log.info("Keychain preflight requires interaction", metadata: ["service": service])
-            return .interactionRequired
-        default:
-            self.log.warning("Keychain preflight failed", metadata: ["service": service, "status": "\(status)"])
-            return .failure(Int(status))
-        }
-        #else
         return .notFound
-        #endif
     }
 }
