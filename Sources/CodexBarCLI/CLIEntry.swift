@@ -5,8 +5,10 @@ import AppKit
 #endif
 #if canImport(Darwin)
 import Darwin
-#else
+#elseif canImport(Glibc)
 import Glibc
+#elseif os(Windows)
+import WinSDK
 #endif
 import Foundation
 #if canImport(FoundationNetworking)
