@@ -2,11 +2,8 @@ import Foundation
 
 /// Credential cache store.
 ///
-/// TODO: Implement Windows Credential Manager integration using:
-/// - CredWrite / CredRead / CredDelete from wincred.h
-/// - DPAPI for encryption (CryptProtectData / CryptUnprotectData)
-///
-/// Current implementation uses file-based storage as a placeholder.
+/// On Windows, uses Windows Credential Manager (wincred.h) with DPAPI protection.
+/// On other platforms, uses file-based storage in the user's home directory.
 public enum KeychainCacheStore {
     public struct Key: Hashable, Sendable {
         public let category: String
@@ -44,7 +41,28 @@ public enum KeychainCacheStore {
             return testResult
         }
 
-        // File-based storage for Windows (placeholder)
+        #if os(Windows)
+        // Use Windows Credential Manager
+        guard let data = WindowsCredentialStore.load(key: key.account) else {
+            return .missing
+        }
+
+        // Decrypt with DPAPI
+        guard let decrypted = WindowsDataProtection.unprotect(data: data) else {
+            self.log.error("Failed to decrypt cache (\(key.account))")
+            return .invalid
+        }
+
+        do {
+            let decoder = Self.makeDecoder()
+            let decoded = try decoder.decode(Entry.self, from: decrypted)
+            return .found(decoded)
+        } catch {
+            self.log.error("Failed to decode cache (\(key.account)): \(error)")
+            return .invalid
+        }
+        #else
+        // File-based storage for non-Windows platforms
         guard let cacheDir = getCacheDirectory() else { return .missing }
         let filePath = cacheDir.appendingPathComponent("\(key.account).json")
 
@@ -61,6 +79,7 @@ public enum KeychainCacheStore {
             self.log.error("Failed to load cache (\(key.account)): \(error)")
             return .invalid
         }
+        #endif
     }
 
     public static func store(key: Key, entry: some Codable) {
@@ -68,7 +87,28 @@ public enum KeychainCacheStore {
             return
         }
 
-        // File-based storage for Windows (placeholder)
+        #if os(Windows)
+        // Use Windows Credential Manager with DPAPI encryption
+        do {
+            let encoder = Self.makeEncoder()
+            let data = try encoder.encode(entry)
+
+            // Encrypt with DPAPI
+            guard let encrypted = WindowsDataProtection.protect(
+                data: data,
+                description: "CodexBar credential cache") else {
+                self.log.error("Failed to encrypt cache (\(key.account))")
+                return
+            }
+
+            if !WindowsCredentialStore.store(key: key.account, data: encrypted) {
+                self.log.error("Failed to store cache (\(key.account))")
+            }
+        } catch {
+            self.log.error("Failed to encode cache (\(key.account)): \(error)")
+        }
+        #else
+        // File-based storage for non-Windows platforms
         guard let cacheDir = getCacheDirectory() else { return }
         let filePath = cacheDir.appendingPathComponent("\(key.account).json")
 
@@ -77,9 +117,16 @@ public enum KeychainCacheStore {
             let encoder = Self.makeEncoder()
             let data = try encoder.encode(entry)
             try data.write(to: filePath)
+            #if os(Linux)
+            // Set secure permissions on Linux
+            try FileManager.default.setAttributes([
+                .posixPermissions: NSNumber(value: Int16(0o600)),
+            ], ofItemAtPath: filePath.path)
+            #endif
         } catch {
             self.log.error("Failed to store cache (\(key.account)): \(error)")
         }
+        #endif
     }
 
     public static func clear(key: Key) {
@@ -87,15 +134,27 @@ public enum KeychainCacheStore {
             return
         }
 
-        // File-based storage for Windows (placeholder)
+        #if os(Windows)
+        // Use Windows Credential Manager
+        _ = WindowsCredentialStore.delete(key: key.account)
+        #else
+        // File-based storage for non-Windows platforms
         guard let cacheDir = getCacheDirectory() else { return }
         let filePath = cacheDir.appendingPathComponent("\(key.account).json")
-
         try? FileManager.default.removeItem(at: filePath)
+        #endif
     }
 
     private static func getCacheDirectory() -> URL? {
-        // Use AppData on Windows, or a .codexbar directory
+        #if os(Windows)
+        // On Windows, use AppData\Local\CodexBar
+        if let appData = ProcessInfo.processInfo.environment["LOCALAPPDATA"] {
+            return URL(fileURLWithPath: appData)
+                .appendingPathComponent("CodexBar")
+                .appendingPathComponent("cache")
+        }
+        #endif
+        // Fallback: use ~/.codexbar/cache
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         return homeDir.appendingPathComponent(".codexbar").appendingPathComponent("cache")
     }

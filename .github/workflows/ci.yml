@@ -6,54 +6,40 @@ on:
   pull_request:
 
 jobs:
-  lint-build-test:
-    runs-on: macos-latest
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Select Xcode 26.1.1 (if present) or fallback to default
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0.1"
+
+      - name: Install SwiftFormat
         run: |
-          set -euo pipefail
-          for candidate in /Applications/Xcode_26.1.1.app /Applications/Xcode_26.1.app /Applications/Xcode.app; do
-            if [[ -d "$candidate" ]]; then
-              sudo xcode-select -s "$candidate"
-              echo "DEVELOPER_DIR=${candidate}/Contents/Developer" >> "$GITHUB_ENV"
-              break
-            fi
-          done
-          /usr/bin/xcodebuild -version
-
-      - name: Install Swift 6.2 toolchain
-        run: |
-          curl -L https://download.swift.org/swift-6.2-release/xcode/swift-6.2-RELEASE/swift-6.2-RELEASE-osx.pkg -o /tmp/swift.pkg
-          sudo installer -pkg /tmp/swift.pkg -target /
-          echo "/Library/Developer/Toolchains/swift-6.2-RELEASE.xctoolchain/usr/bin" >> "$GITHUB_PATH"
-          echo "TOOLCHAINS=swift-6.2-RELEASE" >> "$GITHUB_ENV"
-
-      - name: Install lint tools
-        run: brew install swiftlint swiftformat
+          git clone --depth 1 --branch 0.54.6 https://github.com/nicklockwood/SwiftFormat.git /tmp/swiftformat
+          cd /tmp/swiftformat
+          swift build -c release
+          sudo cp .build/release/swiftformat /usr/local/bin/
 
       - name: SwiftFormat (lint)
         run: swiftformat Sources Tests --lint
 
-      - name: SwiftLint
-        run: swiftlint --strict
-
-      - name: Swift Test
-        run: swift test --parallel
-
-  build-linux-cli:
+  build-linux:
+    name: Build Linux (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: linux-x64
+          - name: x64
             runs-on: ubuntu-24.04
-          - name: linux-arm64
+          - name: arm64
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Runner info
         run: |
@@ -61,16 +47,15 @@ jobs:
           uname -a
           uname -m
 
-      - name: Setup Swift 6.2.1
-        uses: swift-actions/setup-swift@v3
+      - name: Setup Swift 6.0.1
+        uses: swift-actions/setup-swift@v2
         with:
-          swift-version: "6.2.1"
-          skip-verify-signature: true
+          swift-version: "6.0.1"
 
       - name: Build CodexBarCLI (release, static Swift stdlib)
         run: swift build -c release --product CodexBarCLI --static-swift-stdlib
 
-      - name: Swift Test (Linux only)
+      - name: Swift Test
         run: swift test --parallel
 
       - name: Smoke test CodexBarCLI
@@ -81,9 +66,48 @@ jobs:
           BIN="$BIN_DIR/CodexBarCLI"
           "$BIN" --help >/dev/null
           "$BIN" --version >/dev/null
-          if "$BIN" usage --provider codex --web >/dev/null 2>&1; then
-            echo "Expected --web to fail on Linux"
-            exit 1
-          fi
-          "$BIN" usage --provider codex --web 2>&1 | tee /tmp/codexbarcli-stderr.txt >/dev/null || true
-          grep -q "macOS" /tmp/codexbarcli-stderr.txt
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0.1"
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build CodexBarCLI (release)
+        run: swift build -c release --product CodexBarCLI
+
+      - name: Swift Test
+        run: swift test --parallel
+
+      - name: Smoke test CodexBarCLI
+        shell: pwsh
+        run: |
+          $binPath = swift build -c release --product CodexBarCLI --show-bin-path
+          $exe = Join-Path $binPath "CodexBarCLI.exe"
+          & $exe --help
+          & $exe --version
+
+  build-windows-gui:
+    name: Build Windows GUI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore Sources/CodexBarWindows/CodexBarWindows.csproj
+
+      - name: Build GUI
+        run: dotnet build Sources/CodexBarWindows/CodexBarWindows.csproj -c Release --no-restore

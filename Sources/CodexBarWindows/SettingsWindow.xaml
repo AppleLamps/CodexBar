@@ -1,0 +1,117 @@
+<Window x:Class="CodexBarWindows.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CodexBar Settings"
+        Height="450" Width="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="{DynamicResource WindowBackgroundBrush}">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <TextBlock Grid.Row="0"
+                   Text="Settings"
+                   FontSize="24"
+                   FontWeight="Bold"
+                   Margin="0,0,0,20"
+                   Foreground="{DynamicResource PrimaryTextBrush}" />
+
+        <!-- Settings Content -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- General Settings -->
+                <GroupBox Header="General" Margin="0,0,0,15">
+                    <StackPanel Margin="10">
+                        <CheckBox Content="Start with Windows"
+                                  IsChecked="{Binding StartWithWindows}"
+                                  Margin="0,0,0,10" />
+                        <CheckBox Content="Start minimized to tray"
+                                  IsChecked="{Binding StartMinimized}"
+                                  Margin="0,0,0,10" />
+                        <CheckBox Content="Show notifications for usage alerts"
+                                  IsChecked="{Binding ShowNotifications}"
+                                  Margin="0,0,0,10" />
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Update Settings -->
+                <GroupBox Header="Updates" Margin="0,0,0,15">
+                    <StackPanel Margin="10">
+                        <TextBlock Text="Update interval:"
+                                   Margin="0,0,0,5" />
+                        <ComboBox Width="200"
+                                  HorizontalAlignment="Left"
+                                  SelectedIndex="2">
+                            <ComboBoxItem Content="1 minute" />
+                            <ComboBoxItem Content="5 minutes" />
+                            <ComboBoxItem Content="15 minutes" />
+                            <ComboBoxItem Content="30 minutes" />
+                            <ComboBoxItem Content="1 hour" />
+                        </ComboBox>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Alert Settings -->
+                <GroupBox Header="Alerts" Margin="0,0,0,15">
+                    <StackPanel Margin="10">
+                        <TextBlock Text="Alert when usage exceeds:"
+                                   Margin="0,0,0,5" />
+                        <StackPanel Orientation="Horizontal">
+                            <Slider Width="200"
+                                    Minimum="50"
+                                    Maximum="100"
+                                    Value="80"
+                                    TickFrequency="10"
+                                    IsSnapToTickEnabled="True" />
+                            <TextBlock Text="80%"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- CLI Path -->
+                <GroupBox Header="CLI Configuration" Margin="0,0,0,15">
+                    <StackPanel Margin="10">
+                        <TextBlock Text="CodexBar CLI path:"
+                                   Margin="0,0,0,5" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding CliPath}"
+                                     IsReadOnly="True" />
+                            <Button Grid.Column="1"
+                                    Content="Browse..."
+                                    Margin="10,0,0,0"
+                                    Padding="15,5" />
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer Buttons -->
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0">
+            <Button Content="Cancel"
+                    Width="80"
+                    Margin="0,0,10,0"
+                    Click="Cancel_Click" />
+            <Button Content="Save"
+                    Width="80"
+                    Style="{DynamicResource PrimaryButtonStyle}"
+                    Click="Save_Click" />
+        </StackPanel>
+    </Grid>
+</Window>
